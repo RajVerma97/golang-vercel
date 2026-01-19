@@ -15,6 +15,7 @@ import (
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
 	"github.com/RajVerma97/golang-vercel/backend/internal/server"
+	"github.com/docker/docker/api/types/container"
 	"go.uber.org/zap"
 )
 
@@ -124,18 +125,67 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 	// - Ensure you handle private repos if necessary via SSH keys or Tokens.
 
 	// 3. START ISOLATED CONTAINER (The "Build" Box)
-	// - Spin up a Docker container (e.g., using the Docker Go SDK).
 	dockerClient, err := docker_client.NewDockerClient()
 	if err != nil {
 		logger.Error("failed to create docker client", err)
 		return
 	}
+	buildImageName := "golang:1.24-alpine"
+	workDir := "/app"
+	volumeBinds := []string{fmt.Sprintf("%s:/app", tempDirPath)}
+	buildContainerName := fmt.Sprintf("build-worker-%d", job.ID)
 
-	_, err = dockerClient.CreateNewContainer("redis")
+	//When a build container with same buildContainerName already exists
+	if dockerClient.DoesContainerExist(ctx, buildContainerName) {
+		logger.Debug("Container name is taken, removing existing container...")
+		// remove existing build container
+		if err := dockerClient.RemoveContainer(ctx, buildContainerName); err != nil {
+			logger.Error("failed to remove existing build container %s", err, zap.String("buildContainerName", buildContainerName))
+			return
+		}
+	}
+
+	// Create Build Container
+	buildContainerId, err := dockerClient.CreateBuildContainer(ctx, buildImageName, buildContainerName, workDir, volumeBinds)
 	if err != nil {
-		logger.Error("failed to create pull image", err)
+		logger.Error("failed to create build container", err)
 		return
 	}
+
+	// Start Build Container
+	err = dockerClient.StartContainer(ctx, buildContainerId)
+	if err != nil {
+		logger.Error("failed to start build container", err)
+		return
+	}
+
+	// Wait for build to complete
+	statusCh, errCh := dockerClient.WaitContainer(ctx, buildContainerId, container.WaitConditionNotRunning)
+	select {
+	case err := <-errCh:
+		if err != nil {
+			logger.Error("Error waiting for container", err)
+			return
+		}
+	case status := <-statusCh:
+		logger.Info("Build container finished", zap.Int64("exit_code", status.StatusCode))
+
+		if status.StatusCode != 0 {
+			logs, _ := dockerClient.GetContainerLogs(ctx, buildContainerId)
+			logger.Error("Build failed", nil, zap.String("logs", logs))
+			return
+		}
+	}
+	// Verify binary was created
+	binaryPath := filepath.Join(tempDirPath, "bin", "app")
+	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
+		logger.Error("Binary was not created", nil, zap.String("path", binaryPath))
+		return
+	}
+
+	logger.Info("Build successful! Binary created", zap.String("path", binaryPath))
+
+	
 
 	// - Mount the <temp_dir> as a volume inside the container.
 	// - Use a base image like 'node:alpine' or 'python:slim' depending on the framework.
