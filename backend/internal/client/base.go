@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
 	"github.com/RajVerma97/golang-vercel/backend/internal/model"
@@ -36,6 +37,14 @@ func (c *RedisClient) Connect(ctx context.Context) error {
 	return nil
 }
 
+func (c *RedisClient) Close() error {
+	// if there is already a redis existing redis connection, then only close connection
+	if c.client != nil {
+		return c.client.Close()
+	}
+	return nil
+}
+
 func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
 	jsonJob := model.Job{
 		ID:      1,
@@ -53,4 +62,23 @@ func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
 	}
 	fmt.Println("ENQUEUED BUILD JOB SUCCESSFULLY")
 	return nil
+}
+
+func (c *RedisClient) DequeueBuild(ctx context.Context) (*model.Job, error) {
+	data, err := c.client.RPop(ctx, "builds").Result()
+	if err == redis.Nil {
+		// Queue is empty,
+		log.Println("empty")
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to rpop: %w", err)
+	}
+	var job *model.Job
+	if err := json.Unmarshal([]byte(data), &job); err != nil {
+		return nil, err
+	}
+
+	fmt.Println("DEQUEUNING")
+	fmt.Println(job)
+	return job, nil
 }

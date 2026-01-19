@@ -30,6 +30,13 @@ func main() {
 		panic(err)
 	}
 
+	// // enqueue
+	// err = app.RedisClient.EnqueueBuild(ctx)
+	// if err != nil {
+	// 	panic(err)
+	// }
+	app.StartWorker(ctx)
+
 	log.Println("Application running. Press Ctrl+C to stop.")
 	// Wait for interrupt signal - THIS IS IMPORTANT!
 	quit := make(chan os.Signal, 1)
