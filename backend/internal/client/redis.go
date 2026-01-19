@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
-	"github.com/RajVerma97/golang-vercel/backend/internal/model"
+	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -46,10 +45,10 @@ func (c *RedisClient) Close() error {
 }
 
 func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
-	jsonJob := model.Job{
+	jsonJob := dto.Job{
 		ID:      1,
 		RepoUrl: "github.com/demo",
-		Status:  model.JobStatusPending,
+		Status:  dto.JobStatusPending,
 	}
 	fmt.Println("ENQUEUING")
 	data, err := json.Marshal(jsonJob)
@@ -64,16 +63,16 @@ func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
 	return nil
 }
 
-func (c *RedisClient) DequeueBuild(ctx context.Context) (*model.Job, error) {
+func (c *RedisClient) DequeueBuild(ctx context.Context) (*dto.Job, error) {
 	data, err := c.client.RPop(ctx, "builds").Result()
-	if err == redis.Nil {
-		// Queue is empty,
-		log.Println("empty")
-		return nil, nil
-	} else if err != nil {
+	if err != nil {
+		if err == redis.Nil {
+			// Queue is empty, return nil for both without error
+			return nil, nil
+		}
 		return nil, fmt.Errorf("failed to rpop: %w", err)
 	}
-	var job *model.Job
+	var job *dto.Job
 	if err := json.Unmarshal([]byte(data), &job); err != nil {
 		return nil, err
 	}

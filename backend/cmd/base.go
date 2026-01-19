@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/app"
+	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 )
 
 func main() {
@@ -30,12 +31,17 @@ func main() {
 		panic(err)
 	}
 
-	// // enqueue
+	// //  enqueue
 	// err = app.RedisClient.EnqueueBuild(ctx)
 	// if err != nil {
 	// 	panic(err)
 	// }
-	app.StartWorker(ctx)
+	//app.StartWorker(ctx)
+	app.ProcessJob(ctx, &dto.Job{
+		ID:      1,
+		RepoUrl: "https://github.com/RajVerma97/golang-demo.git",
+		Status:  dto.JobStatusPending,
+	})
 
 	log.Println("Application running. Press Ctrl+C to stop.")
 	// Wait for interrupt signal - THIS IS IMPORTANT!
