@@ -9,7 +9,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/RajVerma97/golang-vercel/backend/internal/client"
+	docker_client "github.com/RajVerma97/golang-vercel/backend/internal/client/docker"
+	redis_client "github.com/RajVerma97/golang-vercel/backend/internal/client/redis"
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
@@ -20,7 +21,7 @@ import (
 type App struct {
 	Config      *config.Config
 	Server      *server.HTTPServer
-	RedisClient *client.RedisClient
+	RedisClient *redis_client.RedisClient
 }
 
 func NewApp() (*App, error) {
@@ -36,15 +37,15 @@ func NewApp() (*App, error) {
 	}
 
 	// redis
-	redisClient, err := client.NewRedisClient(config.Redis)
-	if err != nil {
-		return nil, err
-	}
+	// redisClient, err := redis_client.NewRedisClient(config.Redis)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	return &App{
 		Config:      config,
 		Server:      server,
-		RedisClient: redisClient,
+		RedisClient: nil,
 	}, nil
 }
 
@@ -86,16 +87,27 @@ func CreateDirectory(path string) error {
 func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 	logger.Debug("Processing Job", zap.Any("job", job))
 	// 1. INITIALIZE ENVIRONMENT
-	// - Create a temporary unique directory (e.g., /tmp/build-<job-id>)
-	// - Set up logging so the user can see their build logs in real-time.
+
+	// delete existing temp dir
 	cwd, _ := os.Getwd()
 	tempDirPath := filepath.Join(cwd, "tmp", fmt.Sprintf("build-%d", job.ID))
-	err := CreateDirectory(tempDirPath)
+
+	// remove existing /tmp/build-%d directory
+	if _, err := os.Stat(tempDirPath); err == nil {
+		logger.Debug("Removing existing temp directory", zap.String("path", tempDirPath))
+		err = os.RemoveAll(tempDirPath)
+		if err != nil {
+			logger.Error("Failed to remove existing temp directory", err)
+			return
+		}
+	}
+	// create fresh directory
+	err := os.MkdirAll(tempDirPath, 0755)
 	if err != nil {
-		logger.Error("failed to create directory", err, zap.String("tempDirPath", tempDirPath))
+		logger.Error("Failed to create directory", err, zap.String("tempDirPath", tempDirPath))
 		return
 	}
-	logger.Debug("SUCCESSFULLY CREATED TEMP DIR", zap.String("tempDirPath", tempDirPath))
+	logger.Debug("Successfully created temp dir", zap.String("tempDirPath", tempDirPath))
 
 	// 2. CLONE REPOSITORY
 	// Execute: git clone <repo_url> <temp_dir>
@@ -113,7 +125,18 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 
 	// 3. START ISOLATED CONTAINER (The "Build" Box)
 	// - Spin up a Docker container (e.g., using the Docker Go SDK).
-	
+	dockerClient, err := docker_client.NewDockerClient()
+	if err != nil {
+		logger.Error("failed to create docker client", err)
+		return
+	}
+
+	_, err = dockerClient.CreateNewContainer("redis")
+	if err != nil {
+		logger.Error("failed to create pull image", err)
+		return
+	}
+
 	// - Mount the <temp_dir> as a volume inside the container.
 	// - Use a base image like 'node:alpine' or 'python:slim' depending on the framework.
 

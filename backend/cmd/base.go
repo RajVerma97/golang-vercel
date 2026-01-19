@@ -26,10 +26,10 @@ func main() {
 	}
 
 	// Connect to redis
-	err = app.RedisClient.Connect(ctx)
-	if err != nil {
-		panic(err)
-	}
+	// err = app.RedisClient.Connect(ctx)
+	// if err != nil {
+	// 	panic(err)
+	// }
 
 	// //  enqueue
 	// err = app.RedisClient.EnqueueBuild(ctx)
