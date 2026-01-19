@@ -1,0 +1,56 @@
+package client
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+
+	"github.com/RajVerma97/golang-vercel/backend/internal/config"
+	"github.com/RajVerma97/golang-vercel/backend/internal/model"
+	"github.com/redis/go-redis/v9"
+)
+
+type RedisClient struct {
+	config *config.RedisConfig
+	client *redis.Client
+}
+
+func NewRedisClient(config *config.RedisConfig) (*RedisClient, error) {
+	redisClient := &RedisClient{
+		config: config,
+	}
+	return redisClient, nil
+}
+
+func (c *RedisClient) Connect(ctx context.Context) error {
+	fmt.Printf("CONNECTING TO RDIS ")
+	redisAddr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
+	c.client = redis.NewClient(&redis.Options{Addr: redisAddr})
+
+	// ping
+	if err := c.client.Ping(ctx).Err(); err != nil {
+		return fmt.Errorf("failed to ping redis: %w", err)
+	}
+	fmt.Printf("\nSUCCESSFULLY CONNECTED TO REDIS %s\n", redisAddr)
+
+	return nil
+}
+
+func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
+	jsonJob := model.Job{
+		ID:      1,
+		RepoUrl: "github.com/demo",
+		Status:  model.JobStatusPending,
+	}
+	fmt.Println("ENQUEUING")
+	data, err := json.Marshal(jsonJob)
+	if err != nil {
+		return fmt.Errorf("failed to marhsal data:%w ", err)
+	}
+	err = c.client.LPush(ctx, "builds", data).Err()
+	if err != nil {
+		return err
+	}
+	fmt.Println("ENQUEUED BUILD JOB SUCCESSFULLY")
+	return nil
+}
