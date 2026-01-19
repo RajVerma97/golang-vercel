@@ -2,6 +2,7 @@ package docker_client
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -52,15 +53,10 @@ func (c *DockerClient) PullImage(ctx context.Context, imageName string) error {
 // 2. CREATE CONTAINER (with volume mounts for your build files)
 func (c *DockerClient) CreateBuildContainer(ctx context.Context, imageName, containerName, workDir string, volumeBinds []string) (string, error) {
 	logger.Debug("Creating container", zap.String("image", imageName))
-	// cmd := `
-	// 	set -e
-	// 	go mod tidy
-	// 	GOOS=darwin GOARCH=arm64 go build -o bin/app .
-	// `
 	cmd := `
 		set -e
 		go mod tidy
-		GOOS=linux GOARCH=amd64 go build -o bin/app .
+		 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/app .
 		`
 
 	resp, err := c.client.ContainerCreate(ctx,
@@ -82,37 +78,50 @@ func (c *DockerClient) CreateBuildContainer(ctx context.Context, imageName, cont
 	logger.Debug("Successfully created container", zap.String("container_id", resp.ID))
 	return resp.ID, nil
 }
+func (c *DockerClient) CreateDeploymentContainer(ctx context.Context, imageName string, containerName string, volumeBinds []string, port string, deploymentID int) (string, error) {
+	logger.Debug("Creating deployment container", zap.String("name", containerName))
 
-func (c *DockerClient) CreateDeploymentContainer(image string) (*string, error) {
-	containerName := image
-	hostBinding := nat.PortBinding{
-		HostIP:   "0.0.0.0",
-		HostPort: "8000",
-	}
-	containerPort, err := nat.NewPort("tcp", "80")
-	if err != nil {
-		logger.Error("failed to get the port", nil)
-		return nil, nil
-	}
+	subdomain := fmt.Sprintf("deployment-%d", deploymentID)
 
-	portBinding := nat.PortMap{containerPort: []nat.PortBinding{hostBinding}}
-	cont, err := c.client.ContainerCreate(context.Background(),
+	resp, err := c.client.ContainerCreate(ctx,
 		&container.Config{
-			Image: image,
+			Image:      imageName,
+			WorkingDir: "/app",
+			Cmd:        []string{"/app/app"},
+			ExposedPorts: nat.PortSet{
+				nat.Port(port + "/tcp"): struct{}{},
+			},
+			Labels: map[string]string{
+				// Traefik labels for future use
+				"traefik.enable": "true",
+				"traefik.http.routers." + containerName + ".rule":                      fmt.Sprintf("Host(`%s.yourdomain.com`)", subdomain),
+				"traefik.http.services." + containerName + ".loadbalancer.server.port": port,
+			},
 		},
 		&container.HostConfig{
-			PortBindings: portBinding,
-		}, nil, nil, containerName)
+			Binds: volumeBinds,
+			// ADD PORT BINDINGS BACK for direct access
+			PortBindings: nat.PortMap{
+				nat.Port(port + "/tcp"): []nat.PortBinding{
+					{
+						HostIP:   "0.0.0.0",
+						HostPort: "0", // Docker assigns random port
+					},
+				},
+			},
+			RestartPolicy: container.RestartPolicy{
+				Name: "unless-stopped",
+			},
+		},
+		nil, nil, containerName)
+
 	if err != nil {
-		logger.Error("failed to create container", err)
-		panic(err)
+		logger.Error("Failed to create deployment container", err)
+		return "", err
 	}
 
-	if err := c.StartContainer(context.Background(), cont.ID); err != nil {
-		return nil, err
-	}
-	logger.Debug("Successfully Created Docker container", zap.String("image_name", image), zap.String("container_id", cont.ID))
-	return &cont.ID, nil
+	logger.Debug("Successfully created deployment container", zap.String("container_id", resp.ID))
+	return resp.ID, nil
 }
 
 func (c *DockerClient) ListContainers(ctx context.Context) error {

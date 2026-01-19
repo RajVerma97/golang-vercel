@@ -125,6 +125,10 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 	// - Ensure you handle private repos if necessary via SSH keys or Tokens.
 
 	// 3. START ISOLATED CONTAINER (The "Build" Box)
+	// --------------------------------
+	// BUILD PHASE
+	// --------------------------------
+	logger.Info("Starting Build Phase")
 	dockerClient, err := docker_client.NewDockerClient()
 	if err != nil {
 		logger.Error("failed to create docker client", err)
@@ -176,6 +180,14 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 			return
 		}
 	}
+
+	// Get build logs
+	buildLogs, err := dockerClient.GetContainerLogs(ctx, buildContainerId)
+	if err != nil {
+		logger.Error("Failed to get container logs", err)
+	} else {
+		logger.Info("Build Output", zap.String("logs", buildLogs))
+	}
 	// Verify binary was created
 	binaryPath := filepath.Join(tempDirPath, "bin", "app")
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
@@ -184,8 +196,113 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 	}
 
 	logger.Info("Build successful! Binary created", zap.String("path", binaryPath))
+	// Clean up build container
+	err = dockerClient.RemoveContainer(ctx, buildContainerId)
+	if err != nil {
+		logger.Warn("Failed to remove build container", zap.Error(err))
+	}
 
-	
+	// --------------------------------
+	// DEPLOYMENT PHASE
+	// --------------------------------
+	logger.Info("Starting Deployment Phase")
+
+	//
+	// Pull alpine for runtime
+	deployImageName := "alpine:latest"
+	err = dockerClient.PullImage(ctx, deployImageName)
+	if err != nil {
+		return
+	}
+
+	deployContainerName := fmt.Sprintf("deployment-%d", job.ID)
+
+	// Check and remove existing deployment container (ADD THIS)
+	if dockerClient.DoesContainerExist(ctx, deployContainerName) {
+		logger.Debug("Deployment container already exists, removing...")
+		if err := dockerClient.RemoveContainer(ctx, deployContainerName); err != nil {
+			logger.Error("failed to remove existing deployment container", err,
+				zap.String("deployContainerName", deployContainerName))
+			return
+		}
+	}
+	deployVolumeBinds := []string{fmt.Sprintf("%s/bin:/app", tempDirPath)}
+
+	deployContainerID, err := dockerClient.CreateDeploymentContainer(
+		ctx,
+		deployImageName,
+		deployContainerName,
+		deployVolumeBinds,
+		"8080", // Your app's port
+		int(job.ID),
+	)
+	if err != nil {
+		logger.Error("failed to create deployment container", err)
+		return
+	}
+
+	err = dockerClient.StartContainer(ctx, deployContainerID)
+	if err != nil {
+		logger.Error("failed to start deployment container", err)
+		return
+	}
+
+	// After starting the deployment container, get its logs
+	time.Sleep(2 * time.Second) // Give it a moment to start
+
+	deployLogs, err := dockerClient.GetContainerLogs(ctx, deployContainerID)
+	if err != nil {
+		logger.Error("Failed to get deployment logs", err)
+	} else {
+		logger.Info("Deployment Container Logs", zap.String("logs", deployLogs))
+	}
+
+	// Also check container status
+	inspect, err := dockerClient.InspectContainer(ctx, deployContainerID)
+	if err != nil {
+		logger.Error("Failed to inspect deployment container", err)
+		return
+	}
+
+	logger.Info("Container State",
+		zap.Bool("running", inspect.State.Running),
+		zap.String("status", inspect.State.Status),
+		zap.Int("exit_code", inspect.State.ExitCode),
+		zap.String("error", inspect.State.Error))
+
+	// Get the assigned port
+	inspect, err = dockerClient.InspectContainer(ctx, deployContainerID)
+	if err != nil {
+		logger.Error("Failed to inspect deployment container", err)
+		return
+	}
+
+	// Check if container is still running
+	if !inspect.State.Running {
+		logger.Error("Deployment container exited unexpectedly",
+			nil,
+			zap.Int("exit_code", inspect.State.ExitCode),
+			zap.String("error", inspect.State.Error))
+
+		// Get logs to see why it exited
+		logs, _ := dockerClient.GetContainerLogs(ctx, deployContainerID)
+		logger.Error("Container logs", nil, zap.String("logs", logs))
+		return
+	}
+
+	// Check if port bindings exist
+	portBindings, exists := inspect.NetworkSettings.Ports["8080/tcp"]
+	if !exists || len(portBindings) == 0 {
+		logger.Error("No port bindings found for container", nil)
+		return
+	}
+
+	hostPort := portBindings[0].HostPort
+	deploymentURL := fmt.Sprintf("http://localhost:%s", hostPort)
+
+	logger.Info("🚀 Deployment successful!",
+		zap.String("url", deploymentURL),
+		zap.String("containerID", deployContainerID))
 
 	// - Mount the <temp_dir> as a volume inside the container.
 	// - Use a base image like 'node:alpine' or 'python:slim' depending on the framework.
