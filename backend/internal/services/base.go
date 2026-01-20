@@ -4,6 +4,7 @@ import (
 	"context"
 
 	docker_client "github.com/RajVerma97/golang-vercel/backend/internal/client/docker"
+	redis_client "github.com/RajVerma97/golang-vercel/backend/internal/client/redis"
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
 )
@@ -23,11 +24,11 @@ func NewServices(ctx context.Context, config *config.Config) (*Services, error) 
 		return nil, err
 	}
 
-	// redisClient, err := redis_client.NewRedisClient(ctx, config.Redis)
-	// if err != nil {
-	// 	logger.Error("failed to init redis client", err)
-	// 	return nil, err
-	// }
+	redisClient, err := redis_client.NewRedisClient(ctx, config.Redis)
+	if err != nil {
+		logger.Error("failed to init redis client", err)
+		return nil, err
+	}
 	buildService := NewBuildService(&BuildServiceConfig{
 		DockerClient: dockerClient,
 	})
@@ -38,7 +39,7 @@ func NewServices(ctx context.Context, config *config.Config) (*Services, error) 
 	gitService := NewGitService(&GitServiceConfig{})
 
 	redisService := NewRedisService(&RedisServiceConfig{
-		// RedisClient: redisClient,
+		RedisClient: redisClient,
 	})
 
 	return &Services{

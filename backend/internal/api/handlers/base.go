@@ -5,14 +5,19 @@ import (
 )
 
 type Handlers struct {
-	BuildHandler *BuildHandler
+	BuildHandler      *BuildHandler
+	DeploymentHandler *DeploymentHandler
 }
 
 func NewHandlers(services *services.Services) *Handlers {
 	buildHandler := NewBuildHandler(&BuildHandlerConfig{
 		services: services,
 	})
+	deploymentHandler := NewDeploymentHandler(&DeploymentHandlerConfig{
+		services: services,
+	})
 	return &Handlers{
-		BuildHandler: buildHandler,
+		BuildHandler:      buildHandler,
+		DeploymentHandler: deploymentHandler,
 	}
 }

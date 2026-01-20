@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"net/http"
-
 	"github.com/RajVerma97/golang-vercel/backend/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -19,8 +17,5 @@ func NewBuildHandler(config *BuildHandlerConfig) *BuildHandler {
 }
 
 func (h *BuildHandler) HandleBuild(c *gin.Context) {
-	response := gin.H{
-		"msg": "hello",
-	}
-	c.JSON(http.StatusOK, response)
+
 }

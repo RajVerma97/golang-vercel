@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/RajVerma97/golang-vercel/backend/internal/api/routes"
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
 	"github.com/RajVerma97/golang-vercel/backend/internal/constants"
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
-	"github.com/RajVerma97/golang-vercel/backend/internal/routes"
 	"github.com/RajVerma97/golang-vercel/backend/internal/server"
 	"github.com/RajVerma97/golang-vercel/backend/internal/services"
 )

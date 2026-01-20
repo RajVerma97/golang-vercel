@@ -7,6 +7,7 @@ import (
 
 func InitRouter(services *services.Services) *gin.Engine {
 	router := gin.New()
-	SetupBuildRoutes(router, services)
+	// SetupBuildRoutes(router, services)
+	SetupDeploymentRoutes(router, services)
 	return router
 }

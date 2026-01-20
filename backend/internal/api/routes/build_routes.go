@@ -1,7 +1,7 @@
 package routes
 
 import (
-	"github.com/RajVerma97/golang-vercel/backend/internal/handlers"
+	"github.com/RajVerma97/golang-vercel/backend/internal/api/handlers"
 	"github.com/RajVerma97/golang-vercel/backend/internal/services"
 	"github.com/gin-gonic/gin"
 )

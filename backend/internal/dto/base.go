@@ -15,8 +15,8 @@ type Build struct {
 	ID            uint64                `json:"id"`
 	DeploymentID  uint64                `json:"deployment_id"`
 	RepoUrl       string                `json:"repo_url"`
-	Branch        string                `json:"branch"`
-	CommitHash    string                `json:"commit_hash"`
+	Branch        *string               `json:"branch"`
+	CommitHash    *string               `json:"commit_hash"`
 	Status        constants.BuildStatus `json:"status"`
 	Logs          string                `json:"logs"`
 	FailureReason *string               `json:"failure_reason"`

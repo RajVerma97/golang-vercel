@@ -25,8 +25,8 @@ func (a *GitService) CloneRepository(ctx context.Context, build *dto.Build, temp
 	args := []string{"clone"}
 
 	// If branch is provided, add "-b branchName"
-	if build.Branch != "" {
-		args = append(args, "-b", build.Branch)
+	if build.Branch != nil && *build.Branch != "" {
+		args = append(args, "-b", *build.Branch)
 	}
 
 	// Add repo URL and destination
@@ -42,17 +42,17 @@ func (a *GitService) CloneRepository(ctx context.Context, build *dto.Build, temp
 	// logger.Debug("Successfully cloned Repository")
 
 	// 2. CHECKOUT COMMIT HASH(if provided)
-	if build.CommitHash != "" {
-		checkoutCmd := exec.CommandContext(ctx, "git", "checkout", build.CommitHash)
+	if build.CommitHash != nil && *build.CommitHash != "" {
+		checkoutCmd := exec.CommandContext(ctx, "git", "checkout", *build.CommitHash)
 		checkoutCmd.Dir = tempDirPath
 		checkoutCmd.Stdout = os.Stdout
 		checkoutCmd.Stderr = os.Stderr
 
 		if err := checkoutCmd.Run(); err != nil {
 			logger.Error("Git checkout failed", err)
-			return fmt.Errorf("failed to checkout commit %s: %w", build.CommitHash, err)
+			return fmt.Errorf("failed to checkout commit %s: %w", *build.CommitHash, err)
 		}
 	}
-	logger.Debug("Successfully cloned Repository", zap.String("branch", build.Branch), zap.String("hash", build.CommitHash))
+	logger.Debug("Successfully cloned Repository", zap.String("branch", *build.Branch), zap.String("hash", *build.CommitHash))
 	return nil
 }
