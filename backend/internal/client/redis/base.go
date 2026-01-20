@@ -6,10 +6,10 @@ import (
 	"fmt"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
-	"github.com/RajVerma97/golang-vercel/backend/internal/constants"
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 type RedisClient struct {
@@ -42,14 +42,8 @@ func (c *RedisClient) Close() error {
 	return nil
 }
 
-func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
-	jsonJob := dto.Build{
-		ID:      1,
-		RepoUrl: "github.com/demo",
-		Status:  constants.BuildStatusPending,
-	}
-	fmt.Println("ENQUEUING")
-	data, err := json.Marshal(jsonJob)
+func (c *RedisClient) EnqueueBuild(ctx context.Context, build *dto.Build) error {
+	data, err := json.Marshal(build)
 	if err != nil {
 		return fmt.Errorf("failed to marhsal data:%w ", err)
 	}
@@ -57,7 +51,7 @@ func (c *RedisClient) EnqueueBuild(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("ENQUEUED BUILD JOB SUCCESSFULLY")
+	logger.Debug("Successfully Enqueued Build ", zap.Any("build", build))
 	return nil
 }
 
@@ -70,12 +64,10 @@ func (c *RedisClient) DequeueBuild(ctx context.Context) (*dto.Build, error) {
 		}
 		return nil, fmt.Errorf("failed to rpop: %w", err)
 	}
-	var job *dto.Build
-	if err := json.Unmarshal([]byte(data), &job); err != nil {
+	var build *dto.Build
+	if err := json.Unmarshal([]byte(data), &build); err != nil {
 		return nil, err
 	}
-
-	fmt.Println("DEQUEUNING")
-	fmt.Println(job)
-	return job, nil
+	logger.Debug("Successfully Dequeued Build ", zap.Any("build", build))
+	return build, nil
 }

@@ -21,8 +21,8 @@ func NewRedisService(config *RedisServiceConfig) *RedisService {
 	}
 }
 
-func (s *RedisService) EnqueueBuild(ctx context.Context) error {
-	return s.RedisClient.EnqueueBuild(ctx)
+func (s *RedisService) EnqueueBuild(ctx context.Context,build *dto.Build) error {
+	return s.RedisClient.EnqueueBuild(ctx,build)
 }
 
 func (s *RedisService) DequeueBuild(ctx context.Context) (*dto.Build, error) {
