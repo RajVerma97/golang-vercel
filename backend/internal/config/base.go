@@ -1,5 +1,7 @@
 package config
 
+import "github.com/RajVerma97/golang-vercel/backend/internal/helpers"
+
 type ServerConfig struct {
 	Host string
 	Port int
@@ -17,12 +19,12 @@ type Config struct {
 func NewConfig() *Config {
 	return &Config{
 		Server: &ServerConfig{
-			Host: "localhost",
-			Port: 8081,
+			Host: helpers.GetEnv("SERVER_HOST", ""),
+			Port: helpers.GetEnv("SERVER_PORT", 0),
 		},
 		Redis: &RedisConfig{
-			Host: "localhost",
-			Port: 6379,
+			Host: helpers.GetEnv("REDIS_HOST", ""),
+			Port: helpers.GetEnv("REDIS_PORT", 0),
 		},
 	}
 }

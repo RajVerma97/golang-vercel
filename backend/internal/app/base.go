@@ -27,13 +27,6 @@ func NewApp() (*App, error) {
 	config := config.NewConfig()
 	ctx := context.Background()
 
-	// logger
-	err := logger.Init("development")
-	if err != nil {
-		logger.Error("failed to init logger", err)
-		return nil, err
-	}
-
 	// services
 	services, err := services.NewServices(ctx, config)
 	if err != nil {

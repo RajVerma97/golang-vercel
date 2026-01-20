@@ -8,14 +8,19 @@ import (
 	"syscall"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/app"
+	"github.com/RajVerma97/golang-vercel/backend/internal/helpers"
+	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
 )
 
 func main() {
+	helpers.InitLogger()
+	defer logger.Sync()
+	helpers.LoadEnv()
+
 	app, err := app.NewApp()
 	if err != nil {
 		panic(err)
 	}
-
 	ctx := context.Background()
 
 	// Start server
@@ -24,7 +29,6 @@ func main() {
 		panic(err)
 	}
 
-	// Start worker
 	app.StartWorker(ctx)
 
 	log.Println("Application running. Press Ctrl+C to stop.")
