@@ -79,39 +79,49 @@ func (a *App) StartWorker(ctx context.Context) {
 				}
 
 				ctx := context.Background()
-				cwd, _ := os.Getwd()
-				tempDirPath := filepath.Join(cwd, "tmp", fmt.Sprintf("build-%d", build.ID))
-
-				// Init environment
-				if err := a.Services.WorkspaceManagerService.Create(ctx, build); err != nil {
-					logger.Error("failed to create workspace", err)
-					return
-				}
-				// Clone repo
-				if err := a.Services.GitService.CloneRepository(ctx, build, tempDirPath); err != nil {
-					logger.Error("failed to clone repo", err)
-					return
-				}
-
-				// Build application
-				if err := a.Services.BuildService.BuildApplication(ctx, build, tempDirPath); err != nil {
-					logger.Error("failed to build", err)
-					return
-				}
-
-				// Deploy application
-				deployment := &dto.Deployment{
-					BuildID:   build.ID,
-					Status:    constants.DeploymentStatusPending,
-					CreatedAt: time.Now(),
-				}
-
-				if err := a.Services.DeployService.DeployApplication(ctx, build, deployment, tempDirPath); err != nil {
-					logger.Error("failed to deploy", err)
-					return
-				}
+				a.ProcessJob(ctx, build)
 			}
 		}
 	}()
+}
 
+func (a *App) ProcessJob(ctx context.Context, build *dto.Build) {
+	cwd, _ := os.Getwd()
+	tempDirPath := filepath.Join(cwd, "tmp", fmt.Sprintf("build-%d", build.ID))
+
+	// Init environment
+	if err := a.Services.WorkspaceManagerService.Create(ctx, build, tempDirPath); err != nil {
+		logger.Error("failed to create workspace", err)
+		return
+	}
+
+	defer func() {
+		logger.Debug("Running defer ")
+		if err := a.Services.WorkspaceManagerService.Cleanup(ctx, tempDirPath); err != nil {
+			logger.Error("failed to cleanup workspace", err)
+		}
+	}()
+	// Clone repo
+	if err := a.Services.GitService.CloneRepository(ctx, build, tempDirPath); err != nil {
+		logger.Error("failed to clone repo", err)
+		return
+	}
+
+	// Build application
+	if err := a.Services.BuildService.BuildApplication(ctx, build, tempDirPath); err != nil {
+		logger.Error("failed to build", err)
+		return
+	}
+
+	// Deploy application
+	deployment := &dto.Deployment{
+		BuildID:   build.ID,
+		Status:    constants.DeploymentStatusPending,
+		CreatedAt: time.Now(),
+	}
+
+	if err := a.Services.DeployService.DeployApplication(ctx, build, deployment, tempDirPath); err != nil {
+		logger.Error("failed to deploy", err)
+		return
+	}
 }

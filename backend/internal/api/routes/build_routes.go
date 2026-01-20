@@ -2,11 +2,9 @@ package routes
 
 import (
 	"github.com/RajVerma97/golang-vercel/backend/internal/api/handlers"
-	"github.com/RajVerma97/golang-vercel/backend/internal/services"
 	"github.com/gin-gonic/gin"
 )
 
-func SetupBuildRoutes(r *gin.Engine, services *services.Services) {
-	handlers := handlers.NewHandlers(services)
+func SetupBuildRoutes(r *gin.Engine, handlers *handlers.Handlers) {
 	r.POST("/deploy", handlers.BuildHandler.HandleBuild)
 }
