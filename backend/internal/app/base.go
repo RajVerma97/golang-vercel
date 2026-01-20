@@ -12,6 +12,7 @@ import (
 	docker_client "github.com/RajVerma97/golang-vercel/backend/internal/client/docker"
 	redis_client "github.com/RajVerma97/golang-vercel/backend/internal/client/redis"
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
+	"github.com/RajVerma97/golang-vercel/backend/internal/constants"
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
 	"github.com/RajVerma97/golang-vercel/backend/internal/server"
@@ -20,9 +21,10 @@ import (
 )
 
 type App struct {
-	Config      *config.Config
-	Server      *server.HTTPServer
-	RedisClient *redis_client.RedisClient
+	Config       *config.Config
+	Server       *server.HTTPServer
+	RedisClient  *redis_client.RedisClient
+	DockerClient *docker_client.DockerClient
 }
 
 func NewApp() (*App, error) {
@@ -43,10 +45,17 @@ func NewApp() (*App, error) {
 	// 	return nil, err
 	// }
 
+	// docker client
+	dockerClient, err := docker_client.NewDockerClient()
+	if err != nil {
+		return nil, err
+	}
+
 	return &App{
-		Config:      config,
-		Server:      server,
-		RedisClient: nil,
+		Config:       config,
+		Server:       server,
+		RedisClient:  nil,
+		DockerClient: dockerClient,
 	}, nil
 }
 
@@ -77,191 +86,211 @@ func (a *App) StartWorker(ctx context.Context) {
 
 }
 
-func CreateDirectory(path string) error {
-	dir := filepath.Dir(path)
-	err := os.MkdirAll(dir, 0755)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
-	logger.Debug("Processing Job", zap.Any("job", job))
-	// 1. INITIALIZE ENVIRONMENT
-
-	// delete existing temp dir
-	cwd, _ := os.Getwd()
-	tempDirPath := filepath.Join(cwd, "tmp", fmt.Sprintf("build-%d", job.ID))
-
+func (a *App) InitializeEnvironment(ctx context.Context, build *dto.Build, tempDirPath string) error {
 	// remove existing /tmp/build-%d directory
 	if _, err := os.Stat(tempDirPath); err == nil {
 		logger.Debug("Removing existing temp directory", zap.String("path", tempDirPath))
 		err = os.RemoveAll(tempDirPath)
 		if err != nil {
 			logger.Error("Failed to remove existing temp directory", err)
-			return
+			return fmt.Errorf("failed to remove existing temp directory;%w", err)
 		}
 	}
 	// create fresh directory
 	err := os.MkdirAll(tempDirPath, 0755)
 	if err != nil {
 		logger.Error("Failed to create directory", err, zap.String("tempDirPath", tempDirPath))
-		return
+		return fmt.Errorf("failed to create directory:%w", err)
 	}
 	logger.Debug("Successfully created temp dir", zap.String("tempDirPath", tempDirPath))
+	return nil
+}
 
-	// 2. CLONE REPOSITORY
+func (a *App) CloneRepository(ctx context.Context, build *dto.Build, tempDirPath string) error {
 	// Execute: git clone <repo_url> <temp_dir>
-	cloneCmd := exec.CommandContext(ctx, "git", "clone", job.RepoUrl, tempDirPath)
+	args := []string{"clone"}
+
+	// If branch is provided, add "-b branchName"
+	if build.Branch != "" {
+		args = append(args, "-b", build.Branch)
+	}
+
+	// Add repo URL and destination
+	args = append(args, build.RepoUrl, tempDirPath)
+
+	cloneCmd := exec.CommandContext(ctx, "git", args...)
 	cloneCmd.Stdout = os.Stdout
 	cloneCmd.Stderr = os.Stderr
-	err = cloneCmd.Run()
-	if err != nil {
+	if err := cloneCmd.Run(); err != nil {
 		logger.Error("Git clone failed", err)
-		return
+		return fmt.Errorf("failed to git clone:%w", err)
 	}
-	logger.Debug("Successfully cloned Repository")
+	// logger.Debug("Successfully cloned Repository")
 
-	// - Ensure you handle private repos if necessary via SSH keys or Tokens.
+	// 2. CHECKOUT COMMIT HASH(if provided)
+	if build.CommitHash != "" {
+		checkoutCmd := exec.CommandContext(ctx, "git", "checkout", build.CommitHash)
+		checkoutCmd.Dir = tempDirPath
+		checkoutCmd.Stdout = os.Stdout
+		checkoutCmd.Stderr = os.Stderr
 
-	// 3. START ISOLATED CONTAINER (The "Build" Box)
-	// --------------------------------
-	// BUILD PHASE
-	// --------------------------------
+		if err := checkoutCmd.Run(); err != nil {
+			logger.Error("Git checkout failed", err)
+			return fmt.Errorf("failed to checkout commit %s: %w", build.CommitHash, err)
+		}
+	}
+	logger.Debug("Successfully cloned Repository", zap.String("branch", build.Branch), zap.String("hash", build.CommitHash))
+	return nil
+}
+
+func (a *App) BuildApplication(ctx context.Context, build *dto.Build, tempDirPath string) error {
+	// mark the build as building
+	now := time.Now()
+	build.StartedAt = &now
+	build.Status = constants.BuildStatusBuilding
 	logger.Info("Starting Build Phase")
-	dockerClient, err := docker_client.NewDockerClient()
-	if err != nil {
-		logger.Error("failed to create docker client", err)
-		return
-	}
 	buildImageName := "golang:1.24-alpine"
 	workDir := "/app"
 	volumeBinds := []string{fmt.Sprintf("%s:/app", tempDirPath)}
-	buildContainerName := fmt.Sprintf("build-worker-%d", job.ID)
+	buildContainerName := fmt.Sprintf("build-worker-%d", build.ID)
 
 	//When a build container with same buildContainerName already exists
-	if dockerClient.DoesContainerExist(ctx, buildContainerName) {
+	if a.DockerClient.DoesContainerExist(ctx, buildContainerName) {
 		logger.Debug("Container name is taken, removing existing container...")
 		// remove existing build container
-		if err := dockerClient.RemoveContainer(ctx, buildContainerName); err != nil {
+		if err := a.DockerClient.RemoveContainer(ctx, buildContainerName); err != nil {
 			logger.Error("failed to remove existing build container %s", err, zap.String("buildContainerName", buildContainerName))
-			return
+			return fmt.Errorf("failed to remove existing build container:%w", err)
 		}
 	}
 
 	// Create Build Container
-	buildContainerId, err := dockerClient.CreateBuildContainer(ctx, buildImageName, buildContainerName, workDir, volumeBinds)
+	buildContainerId, err := a.DockerClient.CreateBuildContainer(ctx, buildImageName, buildContainerName, workDir, volumeBinds)
 	if err != nil {
 		logger.Error("failed to create build container", err)
-		return
+		return fmt.Errorf("failed to create build container:%w", err)
 	}
 
 	// Start Build Container
-	err = dockerClient.StartContainer(ctx, buildContainerId)
+	err = a.DockerClient.StartContainer(ctx, buildContainerId)
 	if err != nil {
 		logger.Error("failed to start build container", err)
-		return
+		return fmt.Errorf("failed to start build container:%w", err)
 	}
+	if build.Container == nil {
+		build.Container = &dto.Container{}
+	}
+	build.Container.ID = buildContainerId
+	build.Container.Name = buildContainerName
 
 	// Wait for build to complete
-	statusCh, errCh := dockerClient.WaitContainer(ctx, buildContainerId, container.WaitConditionNotRunning)
+	statusCh, errCh := a.DockerClient.WaitContainer(ctx, buildContainerId, container.WaitConditionNotRunning)
 	select {
 	case err := <-errCh:
 		if err != nil {
 			logger.Error("Error waiting for container", err)
-			return
+			return fmt.Errorf("error waiting for container: %w", err)
 		}
 	case status := <-statusCh:
 		logger.Info("Build container finished", zap.Int64("exit_code", status.StatusCode))
 
 		if status.StatusCode != 0 {
-			logs, _ := dockerClient.GetContainerLogs(ctx, buildContainerId)
+			logs, _ := a.DockerClient.GetContainerLogs(ctx, buildContainerId)
 			logger.Error("Build failed", nil, zap.String("logs", logs))
-			return
+			return fmt.Errorf("build failed with exit code %d: %s", status.StatusCode, logs)
 		}
 	}
 
 	// Get build logs
-	buildLogs, err := dockerClient.GetContainerLogs(ctx, buildContainerId)
+	buildLogs, err := a.DockerClient.GetContainerLogs(ctx, buildContainerId)
 	if err != nil {
 		logger.Error("Failed to get container logs", err)
 	} else {
 		logger.Info("Build Output", zap.String("logs", buildLogs))
 	}
+	build.Logs = buildLogs
 	// Verify binary was created
 	binaryPath := filepath.Join(tempDirPath, "bin", "app")
 	if _, err := os.Stat(binaryPath); os.IsNotExist(err) {
 		logger.Error("Binary was not created", nil, zap.String("path", binaryPath))
-		return
+		return fmt.Errorf("binary was not created at %s", binaryPath)
 	}
+	build.BinaryPath = &binaryPath
 
 	logger.Info("Build successful! Binary created", zap.String("path", binaryPath))
 	// Clean up build container
-	err = dockerClient.RemoveContainer(ctx, buildContainerId)
+	err = a.DockerClient.RemoveContainer(ctx, buildContainerId)
 	if err != nil {
 		logger.Warn("Failed to remove build container", zap.Error(err))
 	}
+	build.Status = constants.BuildStatusSuccess
+	build.CompletedAt = &now
+	return nil
+}
 
-	// --------------------------------
-	// DEPLOYMENT PHASE
-	// --------------------------------
+func (a *App) DeployApplication(ctx context.Context, build *dto.Build, deployment *dto.Deployment, tempDirPath string) error {
 	logger.Info("Starting Deployment Phase")
 
-	//
 	// Pull alpine for runtime
 	deployImageName := "alpine:latest"
-	err = dockerClient.PullImage(ctx, deployImageName)
+	err := a.DockerClient.PullImage(ctx, deployImageName)
 	if err != nil {
-		return
+		return fmt.Errorf("failed to pull deploy image: %w", err)
 	}
 
-	deployContainerName := fmt.Sprintf("deployment-%d", job.ID)
+	deployContainerName := fmt.Sprintf("deployment-%d", build.ID)
 
 	// Check and remove existing deployment container (ADD THIS)
-	if dockerClient.DoesContainerExist(ctx, deployContainerName) {
+	if a.DockerClient.DoesContainerExist(ctx, deployContainerName) {
 		logger.Debug("Deployment container already exists, removing...")
-		if err := dockerClient.RemoveContainer(ctx, deployContainerName); err != nil {
+		if err := a.DockerClient.RemoveContainer(ctx, deployContainerName); err != nil {
 			logger.Error("failed to remove existing deployment container", err,
 				zap.String("deployContainerName", deployContainerName))
-			return
+			return err
 		}
 	}
 	deployVolumeBinds := []string{fmt.Sprintf("%s/bin:/app", tempDirPath)}
 
-	deployContainerID, err := dockerClient.CreateDeploymentContainer(
+	deployContainerID, err := a.DockerClient.CreateDeploymentContainer(
 		ctx,
 		deployImageName,
 		deployContainerName,
 		deployVolumeBinds,
 		"8080", // Your app's port
-		int(job.ID),
+		int(build.ID),
 	)
 	if err != nil {
 		logger.Error("failed to create deployment container", err)
-		return
+		return err
 	}
 
-	err = dockerClient.StartContainer(ctx, deployContainerID)
+	err = a.DockerClient.StartContainer(ctx, deployContainerID)
 	if err != nil {
 		logger.Error("failed to start deployment container", err)
-		return
+		return err
 	}
+	if deployment.Container == nil {
+		deployment.Container = &dto.Container{}
+	}
+	deployment.Container.ID = deployContainerID
+	deployment.Container.Name = deployContainerName
 
 	// After starting the deployment container, get its logs
 	time.Sleep(2 * time.Second) // Give it a moment to start
 
-	deployLogs, err := dockerClient.GetContainerLogs(ctx, deployContainerID)
+	deployLogs, err := a.DockerClient.GetContainerLogs(ctx, deployContainerID)
 	if err != nil {
 		logger.Error("Failed to get deployment logs", err)
 	} else {
 		logger.Info("Deployment Container Logs", zap.String("logs", deployLogs))
 	}
+	deployment.Logs = deployLogs
 
 	// Also check container status
-	inspect, err := dockerClient.InspectContainer(ctx, deployContainerID)
+	inspect, err := a.DockerClient.InspectContainer(ctx, deployContainerID)
 	if err != nil {
 		logger.Error("Failed to inspect deployment container", err)
-		return
+		return fmt.Errorf("failed to inspect deployment container: %w", err)
 	}
 
 	logger.Info("Container State",
@@ -269,13 +298,6 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 		zap.String("status", inspect.State.Status),
 		zap.Int("exit_code", inspect.State.ExitCode),
 		zap.String("error", inspect.State.Error))
-
-	// Get the assigned port
-	inspect, err = dockerClient.InspectContainer(ctx, deployContainerID)
-	if err != nil {
-		logger.Error("Failed to inspect deployment container", err)
-		return
-	}
 
 	// Check if container is still running
 	if !inspect.State.Running {
@@ -285,16 +307,17 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 			zap.String("error", inspect.State.Error))
 
 		// Get logs to see why it exited
-		logs, _ := dockerClient.GetContainerLogs(ctx, deployContainerID)
+		logs, _ := a.DockerClient.GetContainerLogs(ctx, deployContainerID)
 		logger.Error("Container logs", nil, zap.String("logs", logs))
-		return
+		return fmt.Errorf("deployment container exited unexpectedly (exit code: %d): %s",
+			inspect.State.ExitCode, inspect.State.Error)
 	}
 
 	// Check if port bindings exist
 	portBindings, exists := inspect.NetworkSettings.Ports["8080/tcp"]
 	if !exists || len(portBindings) == 0 {
 		logger.Error("No port bindings found for container", nil)
-		return
+		return fmt.Errorf("no port bindings found for container")
 	}
 
 	hostPort := portBindings[0].HostPort
@@ -304,19 +327,57 @@ func (a *App) ProcessJob(ctx context.Context, job *dto.Job) {
 		zap.String("url", deploymentURL),
 		zap.String("containerID", deployContainerID))
 
-	// - Mount the <temp_dir> as a volume inside the container.
-	// - Use a base image like 'node:alpine' or 'python:slim' depending on the framework.
+	deployment.URL = deploymentURL
+	deployment.Status  = constants.DeploymentStatusRunning
+	return nil
+}
 
-	// 4. INSTALL & BUILD
-	// - Inside the container, run: 'npm install && npm run build'
-	// - Capturing the output (stdout/stderr) is critical for debugging.
-	// - Identify the output folder (usually 'dist', 'build', or '.next').
+func (a *App) ProcessJob(ctx context.Context, build *dto.Build) error {
+	logger.Debug("Processing Job", zap.Any("job", build))
+	// mark job as building
+	build.Status = constants.BuildStatusBuilding
+	cwd, _ := os.Getwd()
+	tempDirPath := filepath.Join(cwd, "tmp", fmt.Sprintf("build-%d", build.ID))
 
-	// 5. UPLOAD ARTIFACTS
-	// - Push the generated static files to a Storage Provider (AWS S3, Google Cloud Storage).
-	// - The folder structure should follow the deployment ID: /deployments/<job-id>/*
+	// 1. Initialize ENVIRONMENT
+	if err := a.InitializeEnvironment(ctx, build, tempDirPath); err != nil {
+		// mark the job as failed
+		build.Status = constants.BuildStatusFailed
+		return fmt.Errorf("environment initialization failed: %w", err)
+	}
 
-	// 6. UPDATE DATABASE & STATUS
-	// - Update MongoDB: status = 'COMPLETED', deployment_url = 'https://<job-id>.yourdomain.com'
-	// - Clear the local temporary directory to save disk space.
+	// 2. Clone Repository
+	if err := a.CloneRepository(ctx, build, tempDirPath); err != nil {
+		// mark the job as failed
+		build.Status = constants.BuildStatusFailed
+		return fmt.Errorf("repository clone failed: %w", err)
+	}
+
+	// 3. Build App
+
+	if err := a.BuildApplication(ctx, build, tempDirPath); err != nil {
+		// mark. the job as failed
+		build.Status = constants.BuildStatusFailed
+		return fmt.Errorf("application build failed: %w", err)
+	}
+
+	logger.Debug("after building", zap.Any("build", build))
+
+	deployment := &dto.Deployment{
+		BuildID:   build.ID,
+		Status:    constants.DeploymentStatusPending,
+		CreatedAt: time.Now(),
+	}
+
+	// 4. Deploy App
+	if err := a.DeployApplication(ctx, build, deployment, tempDirPath); err != nil {
+		// mark the build as failed
+		build.Status = constants.BuildStatusFailed
+		return fmt.Errorf("application deployment failed: %w", err)
+	}
+	logger.Debug("after deploying", zap.Any("deployment", deployment))
+
+	// mark the build as  success
+	build.Status = constants.BuildStatusSuccess
+	return nil
 }
