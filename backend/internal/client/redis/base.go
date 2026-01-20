@@ -8,6 +8,7 @@ import (
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
 	"github.com/RajVerma97/golang-vercel/backend/internal/constants"
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
+	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -16,25 +17,21 @@ type RedisClient struct {
 	client *redis.Client
 }
 
-func NewRedisClient(config *config.RedisConfig) (*RedisClient, error) {
-	redisClient := &RedisClient{
-		config: config,
-	}
-	return redisClient, nil
-}
-
-func (c *RedisClient) Connect(ctx context.Context) error {
-	fmt.Printf("CONNECTING TO RDIS ")
-	redisAddr := fmt.Sprintf("%s:%d", c.config.Host, c.config.Port)
-	c.client = redis.NewClient(&redis.Options{Addr: redisAddr})
+func NewRedisClient(ctx context.Context, config *config.RedisConfig) (*RedisClient, error) {
+	logger.Debug("CONNECTING TO REDIS ")
+	redisAddr := fmt.Sprintf("%s:%d", config.Host, config.Port)
+	client := redis.NewClient(&redis.Options{Addr: redisAddr})
 
 	// ping
-	if err := c.client.Ping(ctx).Err(); err != nil {
-		return fmt.Errorf("failed to ping redis: %w", err)
+	if err := client.Ping(ctx).Err(); err != nil {
+		return nil, fmt.Errorf("failed to ping redis: %w", err)
 	}
-	fmt.Printf("\nSUCCESSFULLY CONNECTED TO REDIS %s\n", redisAddr)
+	logger.Debug("Successfully Connected TO REDIS ")
 
-	return nil
+	return &RedisClient{
+		client: client,
+		config: config,
+	}, nil
 }
 
 func (c *RedisClient) Close() error {

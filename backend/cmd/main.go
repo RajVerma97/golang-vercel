@@ -6,11 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/app"
-	"github.com/RajVerma97/golang-vercel/backend/internal/constants"
-	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 )
 
 func main() {
@@ -27,6 +24,9 @@ func main() {
 		panic(err)
 	}
 
+	// start worker
+	app.StartWorker(ctx)
+
 	// Connect to redis
 	// err = app.RedisClient.Connect(ctx)
 	// if err != nil {
@@ -39,14 +39,14 @@ func main() {
 	// 	panic(err)
 	// }
 	//app.StartWorker(ctx)
-	app.ProcessJob(ctx, &dto.Build{
-		ID:         1,
-		RepoUrl:    "https://github.com/RajVerma97/golang-demo.git",
-		CommitHash: "52690c286cf237ef76520b088b787354dd2df80e",
-		Branch:     "master",
-		Status:     constants.BuildStatusPending,
-		CreatedAt:  time.Now(),
-	})
+	// app.ProcessJob(ctx, &dto.Build{
+	// 	ID:         1,
+	// 	RepoUrl:    "https://github.com/RajVerma97/golang-demo.git",
+	// 	CommitHash: "52690c286cf237ef76520b088b787354dd2df80e",
+	// 	Branch:     "master",
+	// 	Status:     constants.BuildStatusPending,
+	// 	CreatedAt:  time.Now(),
+	// })
 
 	log.Println("Application running. Press Ctrl+C to stop.")
 	// Wait for interrupt signal - THIS IS IMPORTANT!
