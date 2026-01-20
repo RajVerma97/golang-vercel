@@ -53,6 +53,6 @@ func (a *GitService) CloneRepository(ctx context.Context, build *dto.Build, temp
 			return fmt.Errorf("failed to checkout commit %s: %w", *build.CommitHash, err)
 		}
 	}
-	logger.Debug("Successfully cloned Repository", zap.String("branch", *build.Branch), zap.String("hash", *build.CommitHash))
+	logger.Debug("✅ Successfully cloned Repository", zap.String("branch", *build.Branch), zap.String("hash", *build.CommitHash))
 	return nil
 }

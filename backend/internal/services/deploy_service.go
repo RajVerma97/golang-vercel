@@ -120,7 +120,7 @@ func (a *DeployService) DeployApplication(ctx context.Context, build *dto.Build,
 	hostPort := portBindings[0].HostPort
 	deploymentURL := fmt.Sprintf("http://localhost:%s", hostPort)
 
-	logger.Info("🚀 Deployment successful!",
+	logger.Info("✅ Deployment successful!",
 		zap.String("url", deploymentURL),
 		zap.String("containerID", deployContainerID))
 

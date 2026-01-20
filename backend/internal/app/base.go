@@ -89,7 +89,6 @@ func (a *App) ProcessJob(ctx context.Context, build *dto.Build) {
 	}
 
 	defer func() {
-		logger.Debug("Running defer ")
 		if err := a.Services.WorkspaceManagerService.Cleanup(ctx, tempDirPath); err != nil {
 			logger.Error("failed to cleanup workspace", err)
 		}

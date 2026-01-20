@@ -74,7 +74,7 @@ func (c *DockerClient) CreateBuildContainer(ctx context.Context, imageName, cont
 		return "", err
 	}
 
-	logger.Debug("Successfully created container", zap.String("container_id", resp.ID))
+	logger.Debug("✅ Successfully created container", zap.String("container_id", resp.ID))
 	return resp.ID, nil
 }
 func (c *DockerClient) CreateDeploymentContainer(ctx context.Context, imageName string, containerName string, volumeBinds []string, port string, deploymentID int) (string, error) {
@@ -110,7 +110,7 @@ func (c *DockerClient) CreateDeploymentContainer(ctx context.Context, imageName 
 		return "", err
 	}
 
-	logger.Debug("Successfully created deployment container", zap.String("container_id", resp.ID))
+	logger.Debug("✅ Successfully created deployment container", zap.String("container_id", resp.ID))
 	return resp.ID, nil
 }
 
