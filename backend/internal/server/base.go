@@ -7,17 +7,19 @@ import (
 	"time"
 
 	"github.com/RajVerma97/golang-vercel/backend/internal/config"
+	"github.com/gin-gonic/gin"
 )
 
 type HTTPServer struct {
 	Server *http.Server
 }
 
-func NewHTTPServer(config *config.ServerConfig) (*HTTPServer, error) {
+func NewHTTPServer(handler *gin.Engine, config *config.ServerConfig) (*HTTPServer, error) {
 	serverAddr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	server := &HTTPServer{
 		Server: &http.Server{
-			Addr: serverAddr,
+			Addr:    serverAddr,
+			Handler: handler,
 		},
 	}
 	return server, nil

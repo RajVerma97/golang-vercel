@@ -12,6 +12,7 @@ import (
 	"github.com/RajVerma97/golang-vercel/backend/internal/constants"
 	"github.com/RajVerma97/golang-vercel/backend/internal/dto"
 	"github.com/RajVerma97/golang-vercel/backend/internal/logger"
+	"github.com/RajVerma97/golang-vercel/backend/internal/routes"
 	"github.com/RajVerma97/golang-vercel/backend/internal/server"
 	"github.com/RajVerma97/golang-vercel/backend/internal/services"
 )
@@ -33,17 +34,20 @@ func NewApp() (*App, error) {
 		return nil, err
 	}
 
-	// server
-	server, err := server.NewHTTPServer(config.Server)
-	if err != nil {
-		logger.Error("failed to init server", err)
-		return nil, err
-	}
-
 	// services
 	services, err := services.NewServices(ctx, config)
 	if err != nil {
 		logger.Error("failed to init services", err)
+		return nil, err
+	}
+
+	// router
+	router := routes.InitRouter(services)
+
+	// server
+	server, err := server.NewHTTPServer(router, config.Server)
+	if err != nil {
+		logger.Error("failed to init server", err)
 		return nil, err
 	}
 
