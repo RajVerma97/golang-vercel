@@ -45,6 +45,9 @@ func (h *WebhookHandler) HandleGitHubWebhook(c *gin.Context) {
 		body, _ := io.ReadAll(c.Request.Body)
 
 		if !h.verifySignature(body, signature) {
+			logger.Error("GitHub Webhook: Invalid Signature detected!", nil,
+				zap.String("received_sig", signature),
+			)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid signature"})
 			return
 		}
@@ -93,15 +96,26 @@ func (h *WebhookHandler) HandleGitHubWebhook(c *gin.Context) {
 	}
 	SuccessResponse(c, true)
 }
-
 func (h *WebhookHandler) verifySignature(payload []byte, signature string) bool {
-	if signature == "" {
+	if h.webhookSecret == "" {
+		logger.Warn("GitHub Webhook: Secret not configured, skipping verification")
+		return true // Or false depending on your security policy
+	}
+
+	if signature == "" || !strings.HasPrefix(signature, "sha256=") {
+		return false
+	}
+
+	// Remove the "sha256=" prefix
+	actualSig := signature[7:]
+	sigBytes, err := hex.DecodeString(actualSig)
+	if err != nil {
 		return false
 	}
 
 	mac := hmac.New(sha256.New, []byte(h.webhookSecret))
 	mac.Write(payload)
-	expected := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	expectedMac := mac.Sum(nil)
 
-	return hmac.Equal([]byte(expected), []byte(signature))
+	return hmac.Equal(sigBytes, expectedMac)
 }

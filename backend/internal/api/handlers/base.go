@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/RajVerma97/golang-vercel/backend/internal/helpers"
 	"github.com/RajVerma97/golang-vercel/backend/internal/services"
 )
 
@@ -17,10 +18,11 @@ func NewHandlers(services *services.Services) *Handlers {
 	deploymentHandler := NewDeploymentHandler(&DeploymentHandlerConfig{
 		services: services,
 	})
-	WebhookHandler := NewWebhookHandler(services, "123")
+	webhookHandler := NewWebhookHandler(services, helpers.GetEnv("GITHUB_WEBHOOK_SECRET", ""))
+
 	return &Handlers{
 		BuildHandler:      buildHandler,
 		DeploymentHandler: deploymentHandler,
-		WebhookHandler:    WebhookHandler,
+		WebhookHandler:    webhookHandler,
 	}
 }
