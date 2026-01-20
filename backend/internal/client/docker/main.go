@@ -2,7 +2,6 @@ package docker_client
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -80,9 +79,6 @@ func (c *DockerClient) CreateBuildContainer(ctx context.Context, imageName, cont
 }
 func (c *DockerClient) CreateDeploymentContainer(ctx context.Context, imageName string, containerName string, volumeBinds []string, port string, deploymentID int) (string, error) {
 	logger.Debug("Creating deployment container", zap.String("name", containerName))
-
-	subdomain := fmt.Sprintf("deployment-%d", deploymentID)
-
 	resp, err := c.client.ContainerCreate(ctx,
 		&container.Config{
 			Image:      imageName,
@@ -90,12 +86,6 @@ func (c *DockerClient) CreateDeploymentContainer(ctx context.Context, imageName 
 			Cmd:        []string{"/app/app"},
 			ExposedPorts: nat.PortSet{
 				nat.Port(port + "/tcp"): struct{}{},
-			},
-			Labels: map[string]string{
-				// Traefik labels for future use
-				"traefik.enable": "true",
-				"traefik.http.routers." + containerName + ".rule":                      fmt.Sprintf("Host(`%s.yourdomain.com`)", subdomain),
-				"traefik.http.services." + containerName + ".loadbalancer.server.port": port,
 			},
 		},
 		&container.HostConfig{
